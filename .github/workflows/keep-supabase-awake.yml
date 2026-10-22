@@ -38,7 +38,12 @@ jobs:
 
           # baseline_prices is readable signed-out, so an anonymous GET is a real
           # query against Postgres — enough to count as activity.
-          CODE=$(curl -s -o /tmp/body -w '%{http_code}' --max-time 30 "$URL" -H "apikey: $KEY")
+          # GitHub runs these steps under `bash -e`, so a curl that cannot resolve
+          # the host (exit 6 — exactly what a paused project looks like) would
+          # abort the step before the checks below ever ran, replacing the
+          # diagnostic with a bare exit code. Swallow curl's status and let the
+          # HTTP code drive the outcome instead.
+          CODE=$(curl -s -o /tmp/body -w '%{http_code}' --max-time 30 "$URL" -H "apikey: $KEY" || echo "000")
           echo "HTTP $CODE"
           cat /tmp/body
 
