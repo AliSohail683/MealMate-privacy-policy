@@ -1,0 +1,70 @@
+# Keeps MealMate's Supabase project from auto-pausing.
+#
+# Free-tier Supabase projects pause after 7 days with no activity, and a paused
+# project stops resolving in DNS entirely — NXDOMAIN, indistinguishable from a
+# deleted project. MealMate's has paused twice already. If it happens while an
+# App Review reviewer has the app open, sign-in fails and the build is rejected.
+#
+# This lives in the privacy-policy repo because it is the only public MealMate
+# repo; the app source is not on GitHub.
+#
+# The key below is Supabase's PUBLISHABLE key. It is designed to be public and
+# already ships inside the app binary — Row Level Security is what protects the
+# data, not this key. It is not a secret and deliberately not stored as one.
+
+name: Keep Supabase awake
+
+on:
+  schedule:
+    # Every 3 days, not every 7: GitHub drops scheduled runs under load, and one
+    # missed week would be enough to let the project pause.
+    - cron: '17 4 */3 * *'
+  workflow_dispatch:
+
+permissions:
+  contents: write          # needed for the heartbeat commit below
+
+jobs:
+  ping:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Ping the database
+        id: ping
+        run: |
+          URL="https://fmdnftalrofhoduvpsvg.supabase.co/rest/v1/baseline_prices?select=ingredient&limit=1"
+          KEY="sb_publishable_sJKqQ1tMsOIH24kHIwGdQQ_KvXM04Xr"
+
+          # baseline_prices is readable signed-out, so an anonymous GET is a real
+          # query against Postgres — enough to count as activity.
+          CODE=$(curl -s -o /tmp/body -w '%{http_code}' --max-time 30 "$URL" -H "apikey: $KEY")
+          echo "HTTP $CODE"
+          cat /tmp/body
+
+          if [ "$CODE" = "000" ]; then
+            echo "::error::No response — the project is probably already PAUSED. Restore it in the Supabase dashboard; this workflow cannot un-pause it."
+            exit 1
+          fi
+          if [ "$CODE" != "200" ]; then
+            echo "::error::Unexpected HTTP $CODE from Supabase REST."
+            exit 1
+          fi
+          echo "ok=true" >> "$GITHUB_OUTPUT"
+
+      - name: Record the heartbeat
+        if: steps.ping.outputs.ok == 'true'
+        run: |
+          # GitHub disables scheduled workflows on a repo with no activity for 60
+          # days. Committing each run keeps the repo active so the cron does not
+          # quietly switch itself off — which would defeat the whole point.
+          mkdir -p .github
+          echo "$(date -u +%Y-%m-%dT%H:%M:%SZ) supabase awake" >> .github/heartbeat.log
+          tail -n 40 .github/heartbeat.log > .github/heartbeat.tmp
+          mv .github/heartbeat.tmp .github/heartbeat.log
+
+          git config user.name  "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add .github/heartbeat.log
+          git diff --staged --quiet || git commit -m "chore: supabase heartbeat [skip ci]"
+          git push
