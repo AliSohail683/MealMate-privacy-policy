@@ -43,7 +43,10 @@ jobs:
           # abort the step before the checks below ever ran, replacing the
           # diagnostic with a bare exit code. Swallow curl's status and let the
           # HTTP code drive the outcome instead.
-          CODE=$(curl -s -o /tmp/body -w '%{http_code}' --max-time 30 "$URL" -H "apikey: $KEY" || echo "000")
+          # `|| echo 000` appended a second code to the one curl already prints on
+          # a resolve failure, giving "000000" and missing the paused branch.
+          CODE=$(curl -s -o /tmp/body -w '%{http_code}' --max-time 30 "$URL" -H "apikey: $KEY" || true)
+          CODE="${CODE:-000}"
           echo "HTTP $CODE"
           cat /tmp/body
 
